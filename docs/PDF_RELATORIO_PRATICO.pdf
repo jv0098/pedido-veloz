@@ -1,0 +1,249 @@
+RELATÓRIO TÉCNICO - PARTE PRÁTICA
+Implementação Prática do MVP da Plataforma Pedidos Veloz
+
+Curso: Engenharia Cloud DevOps
+Aluno: João Pereira
+Repositório: https://github.com/jv0098/pedido-veloz
+Vídeo Pitch: [INSERIR LINK DO YOUTUBE AQUI]
+
+────────────────────────────────────────────────────────────────────────
+
+1. INTRODUÇÃO
+
+Este relatório documenta a implementação prática do MVP de modernização
+da plataforma Loja Veloz, cobrindo: infraestrutura local padronizada,
+empacotamento seguro dos microsserviços, manifestos Kubernetes para
+produção, automação de CI/CD, estratégias de escalabilidade e
+observabilidade, e o esqueleto de infraestrutura como código (IaC).
+
+────────────────────────────────────────────────────────────────────────
+
+2. AMBIENTE LOCAL COM DOCKER COMPOSE
+
+Para resolver o problema de desenvolvedores subindo o sistema "como dá",
+desenvolvemos uma arquitetura multi-serviço orquestrada pelo arquivo
+docker-compose.yml na raiz do repositório.
+
+2.1 Arquitetura Multi-serviço Local
+
+O ambiente local engloba os cinco componentes da plataforma:
+
+• api-gateway (Nginx): porta de entrada única exposta na porta 80.
+  Centraliza a autenticação e encaminha o tráfego para os serviços
+  corretos baseando-se no caminho da URL.
+
+• pedidos-service: microsserviço Node.js (porta 8081 interna) responsável
+  pela lógica de criação e consulta de pedidos.
+
+• pagamento-service: microsserviço Node.js (porta 8082 interna) simulando
+  a comunicação com gateways financeiros externos.
+
+• estoque-service: microsserviço Node.js (porta 8083 interna) para consulta
+  e registro de reservas de produtos.
+
+• postgres-db: PostgreSQL 15 com tabelas autoinicializadas e volume persistente.
+
+Comando de inicialização (único comando para subir tudo):
+  docker compose up -d --build
+
+2.2 Boas Práticas Aplicadas
+
+• Volume Persistente: o postgres-db usa volume nomeado "postgres_data"
+  evitando perda de dados locais de teste entre reinicializações.
+
+• Isolamento de Rede: rede bridge dedicada "loja_network" isola os
+  contêineres do tráfego externo.
+
+• Secrets Locais: em vez de expor senhas no YAML, segredos são carregados
+  via Docker Secrets da pasta .secrets/, nunca comitados em texto plano.
+
+• Healthchecks de Sincronização: o PostgreSQL possui healthcheck automático.
+  Os microsserviços só iniciam após o banco confirmar prontidão (condition:
+  service_healthy), evitando erros de conexão na inicialização.
+
+────────────────────────────────────────────────────────────────────────
+
+3. CONTEINERIZAÇÃO E VERSIONAMENTO
+
+3.1 Dockerfiles Multi-stage Otimizados
+
+Cada microsserviço possui um Dockerfile composto por dois estágios:
+
+• Estágio de Build (AS builder): imagem Node.js Alpine completa. Copia
+  arquivos de dependência e executa npm install --only=production,
+  removendo dependências de desenvolvimento do pacote final.
+
+• Estágio de Runtime (AS runner): imagem enxuta de execução. Copia apenas
+  os arquivos necessários do estágio anterior.
+
+Resultado: imagem final reduzida de ~1GB para ~170MB (redução de 83%),
+acelerando uploads e otimizando custos de armazenamento no registry.
+
+3.2 Boas Práticas de Segurança
+
+• Usuário Não-Root: todos os Dockerfiles ativam o usuário sem privilégios
+  com a instrução "USER node" (UID 1000), proibindo execução como root.
+
+• Imagem Base Minimal: uso do Alpine Linux como base do runtime, com
+  superfície de ataque reduzida ao mínimo.
+
+• Versionamento por SHA: imagens tagueadas com o hash único do commit Git
+  (ex: pedidos-service:sha-63d8b576), garantindo rastreabilidade exata
+  do código executado em produção.
+
+────────────────────────────────────────────────────────────────────────
+
+4. KUBERNETES — PRODUÇÃO MÍNIMA
+
+Os manifestos Kubernetes estão organizados na pasta k8s/base/:
+
+4.1 Manifestos Criados
+
+• pedidos-deployment.yaml: Deployment do serviço de Pedidos com 2 réplicas.
+• pedidos-service.yaml: Service ClusterIP expondo a porta 8081 internamente.
+• configmap.yaml: parâmetros públicos de banco de dados (DB_HOST, DB_PORT,
+  DB_NAME, DB_USER) desacoplados do código.
+• secrets.yaml: segredos confidenciais em Base64 (DB_PASSWORD, JWT_SECRET)
+  injetados como variáveis de ambiente nos pods.
+• hpa.yaml: configuração do Horizontal Pod Autoscaler (autoscaling/v2).
+
+4.2 Segurança (Pod Security)
+
+O Deployment implementa securityContext a nível de Pod e Container:
+  • runAsNonRoot: true
+  • runAsUser: 1000
+  • Sem privilégios administrativos adicionais
+
+Isso atende ao nível "Restricted" do Pod Security Standard do Kubernetes.
+
+4.3 Resiliência com Health Probes
+
+• livenessProbe (GET /healthz): reinicia o pod se o processo Node.js travar.
+• readinessProbe (GET /ready): retira o pod de rota se a conexão ao banco
+  cair, garantindo que nenhuma requisição chegue a um pod não saudável.
+
+4.4 Estratégia de Deploy: Rolling Update
+
+Configurado com maxSurge: 1 e maxUnavailable: 0.
+  • maxSurge: 1 cria 1 novo pod antes de desligar o antigo.
+  • maxUnavailable: 0 garante que nenhum pod fique indisponível no deploy.
+  • Resultado: deploy 100% livre de indisponibilidades para o cliente final.
+
+────────────────────────────────────────────────────────────────────────
+
+5. CI/CD — PIPELINE GITHUB ACTIONS
+
+A pipeline está em .github/workflows/ci-cd.yml e possui 3 estágios:
+
+Estágio 1 — Lint & Unit Tests (job: lint-and-test):
+  • Configura ambiente Node.js 18.
+  • Instala dependências com npm install.
+  • Executa linter estático (análise de qualidade de código).
+  • Executa suíte de testes unitários.
+  • Se falhar aqui, os próximos estágios NÃO executam (fail-fast).
+
+Estágio 2 — Build & Push Image (job: build-and-push):
+  • Executa apenas em commits na branch main.
+  • Configura Docker Buildx com cache remoto (type=gha).
+  • Autentica no GitHub Container Registry usando secrets.GITHUB_TOKEN
+    (token automático e seguro, sem expor credenciais no código).
+  • Compila a imagem Docker multi-stage com tags versionadas por SHA.
+
+Estágio 3 — Deploy to Kubernetes (job: deploy):
+  • Executa apenas em push na main após build bem-sucedido.
+  • Atualiza dinamicamente a tag da imagem no manifesto YAML (via sed).
+  • Aplica os manifests: secrets, configmap, deployment, service e HPA.
+  • Monitoramento de rollout com verificação de status.
+  • Demonstração de rollback via "kubectl rollout undo" em caso de falha.
+
+────────────────────────────────────────────────────────────────────────
+
+6. OBSERVABILIDADE, DEPLOY E ESCALA
+
+6.1 Stack de Observabilidade Proposta (OpenTelemetry)
+
+• Prometheus: coleta métricas do cluster e da aplicação (taxa de erros
+  HTTP, latência por endpoint, uso de CPU/memória por pod).
+
+• Grafana: dashboards em tempo real integrando dados do Prometheus.
+  Exibe os 4 Golden Signals: Latência, Tráfego, Erros e Saturação.
+
+• OpenTelemetry + Jaeger: instrumentação automática da rede. Cada
+  requisição recebe um trace-id único. O Jaeger exibe graficamente
+  o caminho da transação entre os microsserviços, localizando
+  exatamente qual serviço causa latência ou erro.
+
+6.2 Escalabilidade: Horizontal Pod Autoscaler (HPA)
+
+Configurado na API autoscaling/v2 com duas métricas paralelas:
+
+• CPU: alvo de 70% de utilização média.
+  Quando a Loja Veloz tem pico (Black Friday), o processamento de
+  requisições cresce. Ao atingir 70%, novos pods são criados em segundos.
+
+• Memória: alvo de 80% de utilização média.
+  Aplicações Node.js podem sofrer memory leaks que não causam pico de
+  CPU mas matam containers por OOM (Out Of Memory). Monitorar memória
+  previne falhas catastróficas silenciosas.
+
+Limites configurados:
+  • minReplicas: 2 (tolerância a falha de hardware em qualquer nó)
+  • maxReplicas: 10 (limite financeiro para evitar custo excessivo em DDoS)
+
+Política de estabilização de descida: 300 segundos (5 minutos) antes
+de reduzir réplicas, evitando comportamento de flapping (escala subir
+e descer repetidamente em picos rápidos).
+
+────────────────────────────────────────────────────────────────────────
+
+7. INFRAESTRUTURA COMO CÓDIGO — TERRAFORM (ESQUELETO)
+
+O diretório terraform/ contém o esqueleto de IaC para provisionar a
+infraestrutura na AWS, composto por 4 arquivos:
+
+• providers.tf: declara provedores AWS, Kubernetes e Helm com versões
+  fixadas. Configura backend remoto em S3 com lock via DynamoDB para
+  evitar conflitos de estado entre membros do time.
+
+• variables.tf: variáveis parametrizadas (região, tipo de instância,
+  versão do EKS, capacidade do cluster).
+
+• main.tf: blueprint central declarando VPC com subnets públicas e
+  privadas em múltiplas zonas de disponibilidade, Internet Gateway,
+  NAT Gateway, IAM Roles e cluster AWS EKS com Node Group auto-escalável.
+
+• outputs.tf: outputs de endpoint do cluster e comando kubeconfig
+  para conexão direta via kubectl.
+
+Justificativa do Terraform: elimina configuration drift (mudanças
+manuais indesejadas na nuvem), garante reprodutibilidade completa
+do ambiente (staging idêntico ao produção) e documenta a infraestrutura
+como código versionado no Git — base da governança corporativa de TI.
+
+────────────────────────────────────────────────────────────────────────
+
+8. FONTE DE PESQUISA — CASE DE REFERÊNCIA
+
+Empresa de Referência: Adidas
+Publicação: CNCF (Cloud Native Computing Foundation) — Case Studies
+Link: https://www.cncf.io/case-studies/adidas/
+
+A equipe de engenharia da Adidas migrou sua infraestrutura de e-commerce
+de VMs fragmentadas e deploys manuais para clusters Kubernetes elásticos.
+
+Paralelos com a Loja Veloz:
+
+1. Paridade Local: a Adidas adotou imagens Docker locais idênticas às
+   de produção, eliminando o clássico problema "funciona na minha máquina".
+   Implementamos o mesmo conceito com Docker Compose.
+
+2. Redução de Custos: adoção de auto-scaling baseado em métricas permitiu
+   que os clusters escalassem horizontalmente em picos e encolhessem em
+   períodos de baixa demanda. Replicamos com o HPA configurado.
+
+3. Zero Downtime com Probes: a Adidas documenta liveness e readiness probes
+   como mecanismo central para deploys sem interrupção na Black Friday.
+   Implementamos idêntica estratégia nos manifestos de Deployment.
+
+────────────────────────────────────────────────────────────────────────
+FIM DO RELATÓRIO PRÁTICO
