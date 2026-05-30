@@ -1,0 +1,103 @@
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pedidos-deployment
+  namespace: loja-veloz
+  labels:
+    app: pedidos-service
+    tier: backend
+spec:
+
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1       
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: pedidos-service
+  template:
+    metadata:
+      labels:
+        app: pedidos-service
+    spec:
+
+      securityContext:
+        runAsNonRoot: true   
+        runAsUser: 1000      
+        runAsGroup: 3000     
+        fsGroup: 2000        
+
+      containers:
+        - name: pedidos-container
+          image: lojaveloz/pedidos-service:v1.0.0
+          imagePullPolicy: IfNotPresent
+
+
+          ports:
+            - containerPort: 8081
+              name: http
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "8081"
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: loja-configmap
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: loja-configmap
+                  key: DB_PORT
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: loja-configmap
+                  key: DB_NAME
+            - name: DB_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: loja-configmap
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: loja-secrets
+                  key: db-password
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: loja-secrets
+                  key: jwt-secret
+
+          resources:
+            requests:
+              cpu: "100m"       
+              memory: "128Mi"   
+            limits:
+              cpu: "500m"       
+              memory: "256Mi"   
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15  
+            periodSeconds: 10        
+            timeoutSeconds: 3        
+            failureThreshold: 3      
+
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            successThreshold: 1
+            failureThreshold: 2

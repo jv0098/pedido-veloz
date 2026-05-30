@@ -1,0 +1,34 @@
+# ==============================================================================
+# LOJA VELOZ - ARQUIVO DE EXCLUSÃO DO GIT (.GITIGNORE)
+# ==============================================================================
+
+# Dependências locais do Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Arquivos temporários do Terraform (Estado local e plugins)
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+*.tfvars.json
+.terraform.lock.hcl
+
+# Caches e arquivos temporários do sistema
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+
+# Segredos locais e arquivos de ambiente (Manter fora do Git em projetos reais)
+# OBS: Mantivemos o diretório `.secrets` fora do ignore neste projeto de aula 
+# para que o seu professor consiga rodar o compose local sem erros de arquivos ausentes.
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local

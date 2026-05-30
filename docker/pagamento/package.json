@@ -1,0 +1,12 @@
+{
+  "name": "lv-pagamento-service",
+  "version": "1.0.0",
+  "description": "Microsserviço de Pagamento para a Loja Veloz",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.0"
+  }
+}
