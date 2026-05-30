@@ -7,7 +7,7 @@ Este repositório contém a arquitetura de modernização DevOps completa para a
 
 O vídeo pitch consolidado resume a arquitetura, demonstra o MVP funcionando e detalha as decisões técnicas tomadas para conteinerização, Kubernetes, pipeline CI/CD, deploy e observabilidade.
 
-*   **Link de Acesso ao Vídeo no YouTube:** `[]`
+*   **Link de Acesso ao Vídeo no YouTube:** `[https://youtu.be/IO1Sqyp9Et4?si=lqldhEhDfOuJdpgy]`
 
 
 ## 📁 Estrutura de Diretórios Organizacional
